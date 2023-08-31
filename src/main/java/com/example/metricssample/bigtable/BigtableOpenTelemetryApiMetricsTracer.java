@@ -11,6 +11,7 @@ public class BigtableOpenTelemetryApiMetricsTracer extends OpenTelemetryMetricsT
 
     public BigtableOpenTelemetryApiMetricsTracer(Meter meter, SpanName spanName) {
         super(meter, spanName);
+
     }
     @Override
     public String attemptLatencyName() {

@@ -13,13 +13,18 @@ import com.google.cloud.bigtable.data.v2.BigtableDataSettings;
 import com.google.cloud.bigtable.data.v2.models.Query;
 import com.google.cloud.bigtable.data.v2.models.Row;
 import com.google.cloud.bigtable.data.v2.models.RowMutation;
+import com.google.cloud.bigtable.data.v2.stub.metrics.RpcMeasureConstants;
 import com.google.cloud.opentelemetry.metric.GoogleCloudMetricExporter;
 import com.google.cloud.opentelemetry.metric.MetricConfiguration;
 import com.google.cloud.opentelemetry.metric.MetricDescriptorStrategy;
 import com.google.common.collect.ImmutableList;
 import io.opencensus.contrib.grpc.metrics.RpcViews;
+import io.opencensus.stats.Measure;
+import io.opencensus.stats.Stats;
+import io.opencensus.tags.TagKey;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.exporter.prometheus.PrometheusHttpServer;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.metrics.Aggregation;
 import io.opentelemetry.sdk.metrics.InstrumentSelector;
@@ -53,7 +58,8 @@ public class BigtableController {
 
     private OpenTelemetry openTelemetry;
     private ProjectConfigs projectConfigs;
-
+    static final TagKey BIGTABLE_OP = TagKey.create("bigtable_op");
+    static final TagKey BIGTABLE_STATUS = TagKey.create("bigtable_status");
     public BigtableController(OpenTelemetry openTelemetry, ProjectConfigs projectConfigs) throws Exception {
         this.openTelemetry = openTelemetry;
         this.projectConfigs = projectConfigs;
@@ -76,6 +82,15 @@ public class BigtableController {
         BigtableDataSettings.enableBuiltinMetrics();
         BigtableDataSettings.enableGfeOpenCensusStats();
         BigtableDataSettings.enableOpenCensusStats();
+        Measure.MeasureLong bigtableAttemptLatencyMeasure = Measure.MeasureLong.create("cloud.google.com/java/bigtable/attempt_latency", "Duration of an individual operation attempt", "ms");
+
+        io.opencensus.stats.View attemptCountView = io.opencensus.stats.View.create(io.opencensus.stats.View.Name
+                        .create("cloud.google.com/java/bigtable/attempt_count"),
+                "Attempt count",
+                bigtableAttemptLatencyMeasure,
+                io.opencensus.stats.Aggregation.Count.create(),
+                ImmutableList.of(RpcMeasureConstants.BIGTABLE_PROJECT_ID, RpcMeasureConstants.BIGTABLE_INSTANCE_ID, RpcMeasureConstants.BIGTABLE_APP_PROFILE_ID, BIGTABLE_OP, BIGTABLE_STATUS));
+        Stats.getViewManager().registerView(attemptCountView);
 
         dataClient = BigtableDataClient.create(builder.build());
         BigtableTableAdminSettings adminSettings =
@@ -96,6 +111,7 @@ public class BigtableController {
                             16.0, 20.0, 25.0, 30.0, 40.0, 50.0, 65.0, 80.0, 100.0, 130.0, 160.0, 200.0, 250.0,
                             300.0, 400.0, 500.0, 650.0, 800.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0, 50000.0,
                             100000.0));
+
     private OpenTelemetryMetricsFactory createOpenTelemetryTracerFactory() {
         //Default resource is "Generic Task"
         Resource resource = Resource.getDefault()
@@ -121,9 +137,19 @@ public class BigtableController {
                 .setType(InstrumentType.HISTOGRAM)
                 .setUnit("ms")
                 .build();
+        View attemptCountView = View.builder()
+                .setName("custom.googleapis.com/opentelemetry/cloud.google.com/java/bigtable/attempt_count")
+                .setDescription("Attempt count")
+                .setAggregation(Aggregation.sum())
+                .build();
+        InstrumentSelector attemptCountSelector = InstrumentSelector.builder()
+                .setName(BIGTABLE_ATTEMPT_LATENCY)
+                .setMeterName(METER_NAME)
+                .setType(InstrumentType.HISTOGRAM)
+                .build();
         View operationLatencyView = View.builder()
                 .setName("custom.googleapis.com/opentelemetry/cloud.google.com/java/bigtable/operation_latency")
-                .setDescription("Attempt latency in msecs")
+                .setDescription("Operation latency in msecs")
                 .setAggregation(AGGREGATION_WITH_MILLIS_HISTOGRAM)
                 .build();
         InstrumentSelector operationLatencyInstrumentSelector = InstrumentSelector.builder()
@@ -132,18 +158,21 @@ public class BigtableController {
                 .setType(InstrumentType.HISTOGRAM)
                 .setUnit("ms")
                 .build();
+        PrometheusHttpServer prometheusReader = PrometheusHttpServer.builder().setPort(9091).build();
         SdkMeterProvider sdkMeterProvider = SdkMeterProvider.builder()
                 .registerMetricReader(PeriodicMetricReader.builder(cloudMonitoringExporter).setInterval(Duration.ofSeconds(20)).build())
+                .registerMetricReader(prometheusReader)
                 .setResource(resource)
                 .registerView(instrumentSelector, view)
                 .registerView(operationLatencyInstrumentSelector, operationLatencyView)
+                .registerView(attemptCountSelector, attemptCountView)
                 .build();
 
         OpenTelemetry openTelemetry = OpenTelemetrySdk.builder()
                 .setMeterProvider(sdkMeterProvider)
                 .build();
 
-        return new BigtableOpenTelemetryMetricsFactory(this.openTelemetry);
+        return new BigtableOpenTelemetryMetricsFactory(openTelemetry);
     }
 
     @GetMapping(path = "/", produces = "application/json")
