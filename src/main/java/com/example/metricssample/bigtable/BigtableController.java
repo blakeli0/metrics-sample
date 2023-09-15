@@ -35,7 +35,6 @@ import io.opentelemetry.sdk.metrics.export.MetricExporter;
 import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
 import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -43,6 +42,10 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.Duration;
 
 import static com.example.metricssample.bigtable.BigtableOpenTelemetryApiMetricsTracer.BIGTABLE_ATTEMPT_LATENCY;
+import static com.example.metricssample.bigtable.BigtableOpenTelemetryApiMetricsTracer.ATTEMPT_LATENCY_INSTRUMENT_SELECTOR;
+import static com.example.metricssample.bigtable.BigtableOpenTelemetryApiMetricsTracer.OPERATION_LATENCY_INSTRUMENT_SELECTOR;
+import static com.example.metricssample.bigtable.BigtableOpenTelemetryApiMetricsTracer.OPERATION_LATENCY_VIEW;
+import static com.example.metricssample.bigtable.BigtableOpenTelemetryApiMetricsTracer.ATTEMPT_LATENCY_VIEW;
 import static com.example.metricssample.bigtable.BigtableOpenTelemetryMetricsFactory.METER_NAME;
 
 @RestController
@@ -104,13 +107,6 @@ public class BigtableController {
             writeToTable();
         }
     }
-    private static final Aggregation AGGREGATION_WITH_MILLIS_HISTOGRAM =
-            Aggregation.explicitBucketHistogram(
-                    ImmutableList.of(
-                            0.0, 0.01, 0.05, 0.1, 0.3, 0.6, 0.8, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 13.0,
-                            16.0, 20.0, 25.0, 30.0, 40.0, 50.0, 65.0, 80.0, 100.0, 130.0, 160.0, 200.0, 250.0,
-                            300.0, 400.0, 500.0, 650.0, 800.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0, 50000.0,
-                            100000.0));
 
     private OpenTelemetryMetricsFactory createOpenTelemetryTracerFactory() {
         //Default resource is "Generic Task"
@@ -126,17 +122,6 @@ public class BigtableController {
                         .setDescriptorStrategy(MetricDescriptorStrategy.SEND_ONCE)
                         .build());
 
-        View view = View.builder()
-                .setName("custom.googleapis.com/opentelemetry/cloud.google.com/java/bigtable/attempt_latency")
-                .setDescription("Attempt latency in msecs")
-                .setAggregation(AGGREGATION_WITH_MILLIS_HISTOGRAM)
-                .build();
-        InstrumentSelector instrumentSelector = InstrumentSelector.builder()
-                .setName(BIGTABLE_ATTEMPT_LATENCY)
-                .setMeterName(METER_NAME)
-                .setType(InstrumentType.HISTOGRAM)
-                .setUnit("ms")
-                .build();
         View attemptCountView = View.builder()
                 .setName("custom.googleapis.com/opentelemetry/cloud.google.com/java/bigtable/attempt_count")
                 .setDescription("Attempt count")
@@ -147,24 +132,14 @@ public class BigtableController {
                 .setMeterName(METER_NAME)
                 .setType(InstrumentType.HISTOGRAM)
                 .build();
-        View operationLatencyView = View.builder()
-                .setName("custom.googleapis.com/opentelemetry/cloud.google.com/java/bigtable/operation_latency")
-                .setDescription("Operation latency in msecs")
-                .setAggregation(AGGREGATION_WITH_MILLIS_HISTOGRAM)
-                .build();
-        InstrumentSelector operationLatencyInstrumentSelector = InstrumentSelector.builder()
-                .setName("operation_latency")
-                .setMeterName(METER_NAME)
-                .setType(InstrumentType.HISTOGRAM)
-                .setUnit("ms")
-                .build();
+
         PrometheusHttpServer prometheusReader = PrometheusHttpServer.builder().setPort(9091).build();
         SdkMeterProvider sdkMeterProvider = SdkMeterProvider.builder()
                 .registerMetricReader(PeriodicMetricReader.builder(cloudMonitoringExporter).setInterval(Duration.ofSeconds(20)).build())
                 .registerMetricReader(prometheusReader)
                 .setResource(resource)
-                .registerView(instrumentSelector, view)
-                .registerView(operationLatencyInstrumentSelector, operationLatencyView)
+                .registerView(ATTEMPT_LATENCY_INSTRUMENT_SELECTOR, ATTEMPT_LATENCY_VIEW)
+                .registerView(OPERATION_LATENCY_INSTRUMENT_SELECTOR, OPERATION_LATENCY_VIEW)
                 .registerView(attemptCountSelector, attemptCountView)
                 .build();
 
