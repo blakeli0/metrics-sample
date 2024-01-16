@@ -1,7 +1,6 @@
 package com.example.metricssample.bigtable;
 
 import com.google.api.gax.tracing.ApiTracer;
-import com.google.api.gax.tracing.ClientMetricsTracer;
 import com.google.api.gax.tracing.OpenTelemetryMetricsFactory;
 import com.google.api.gax.tracing.SpanName;
 import io.opentelemetry.api.OpenTelemetry;
@@ -24,8 +23,4 @@ public class BigtableOpenTelemetryMetricsFactory extends OpenTelemetryMetricsFac
         return new BigtableOpenTelemetryApiMetricsTracer(meter, spanName);
     }
 
-    @Override
-    public ClientMetricsTracer newClientMetricsTracer() {
-        return new BigtableOpenTelemetryClientMetricsTracer(meter);
-    }
 }
